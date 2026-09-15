@@ -18,21 +18,19 @@ Two independent data flows, don't confuse them:
   1. Site-like browsing (Home / States / MP Profiles) -> live public API,
      falls back to the local export if the API is unreachable.
   2. AI Risk Intelligence (Priority Queue / MP Fund Risk) -> always comes
-     from ./data/risk_scores_*.json, produced by the Colab notebook.
+     from ./risk_scores_*.json, produced by the Colab notebook.
 
 Run locally with:
-    streamlit run app.py
+    streamlit run mplads.py
 
-Folder layout expected:
-    streamlit_app/
-    ├── app.py
-    └── data/
-        ├── national_overview.json
-        ├── risk_scores_works.json
-        ├── risk_scores_mps.json
-        ├── aggregate_by_state.json
-        ├── aggregate_by_worktype.json
-        └── meta_summary.json
+Folder layout expected (data files sit next to this script):
+    mplads.py
+    national_overview.json
+    risk_scores_works.json
+    risk_scores_mps.json
+    aggregate_by_state.json
+    aggregate_by_worktype.json
+    meta_summary.json
 =============================================================================
 """
 
@@ -53,7 +51,9 @@ st.set_page_config(
     layout="wide",
 )
 
-DATA_DIR = Path(__file__).parent / "data"
+# Data JSON files live right next to this script (repo root) — NOT in a
+# separate "data" subfolder, since that's how they're actually committed.
+DATA_DIR = Path(__file__).parent
 RISK_COLORS = {"High": "#d62728", "Medium": "#ff9f1c", "Low": "#2ca02c"}
 
 # -----------------------------------------------------------------------
@@ -120,8 +120,8 @@ def _local_json(filename: str):
 
 def get_browse_data() -> tuple[pd.DataFrame, str]:
     """Returns (dataframe, source_label) for the site-like browsing pages.
-    Tries the live public API first; falls back quietly to the local
-    AI-scored MP export, which has the same core columns."""
+    Always tries the live public API first; falls back quietly to the
+    local AI-scored MP export (same core columns) if it's unreachable."""
     try:
         return fetch_all_mp_summaries_live(), "live"
     except Exception:
@@ -130,12 +130,11 @@ def get_browse_data() -> tuple[pd.DataFrame, str]:
 
 
 # -----------------------------------------------------------------------
-# STEP 4 — 🔌 INTEGRATION POINT #2: your own risk-scoring API (fill in later)
+# STEP 4 — 🔌 INTEGRATION POINT #2: your own risk-scoring API key
 # -----------------------------------------------------------------------
-# Distinct from STEP 3 above. This is for when you wrap the trained model
-# (Colab notebook) in your own backend serving pre-scored risk data. Until
-# then, works_df / mps_df below load straight from the Colab JSON export.
-
+# Only an API key is used in this project (no base URL / no live risk-API
+# calls yet). The key is pulled from Streamlit Cloud's secrets manager, not
+# hardcoded, and is kept here for when the scoring endpoint is wired up.
 RISK_API_KEY = st.secrets.get("RISK_API_KEY", "")
 
 
@@ -145,20 +144,12 @@ def _risk_headers():
 
 @st.cache_data(ttl=300)
 def load_work_risk_scores() -> pd.DataFrame:
-    if RISK_API_BASE_URL:
-        r = requests.get(f"{RISK_API_BASE_URL}/risk/works", headers=_risk_headers(), timeout=30)
-        r.raise_for_status()
-        return pd.DataFrame(r.json())
     data = _local_json("risk_scores_works.json")
     return pd.DataFrame(data) if data else pd.DataFrame()
 
 
 @st.cache_data(ttl=300)
 def load_mp_risk_scores() -> pd.DataFrame:
-    if RISK_API_BASE_URL:
-        r = requests.get(f"{RISK_API_BASE_URL}/risk/mps", headers=_risk_headers(), timeout=30)
-        r.raise_for_status()
-        return pd.DataFrame(r.json())
     data = _local_json("risk_scores_mps.json")
     return pd.DataFrame(data) if data else pd.DataFrame()
 
@@ -197,9 +188,8 @@ if "selected_mp" not in st.session_state:
     st.session_state.selected_mp = None
 
 # -----------------------------------------------------------------------
-# STEP 6 — Sidebar: data source + nav
+# STEP 6 — Sidebar: nav (no data-source picker — always live-with-fallback)
 # -----------------------------------------------------------------------
-st.session_state["use_live_data"] = True  # always try live first, fall back silently
 browse_df, browse_source = get_browse_data()
 
 st.sidebar.header("Navigate")
@@ -412,7 +402,7 @@ elif st.session_state.nav == "🤖 AI Risk Intelligence — New":
             out = out[out["State"].isin(selected_states)]
         if selected_worktypes and "work_type" in out.columns:
             out = out[out["work_type"].isin(selected_worktypes)]
-        if selected_bands:
+        if selected_bands and band_col in out.columns:
             out = out[out[band_col].isin(selected_bands)]
         if min_amount and "amount" in out.columns:
             out = out[out["amount"] >= min_amount]
@@ -526,7 +516,7 @@ elif st.session_state.nav == "📊 Analytics":
 st.divider()
 st.caption(
     "Browsing pages modeled on the public Empowered Indian MPLADS dashboard "
-    "Reference- https://mplads.mospi.gov.in/digigov/dashboard.html .The AI Risk Intelligence "
+    "(empoweredindian.in/mplads) and its public API. The AI Risk Intelligence "
     "tab is our own addition, scored by a hybrid rule-based + Isolation Forest "
     f"model (see the companion Colab notebook). Last AI scoring run: {meta.get('generated_at', 'unknown')}."
 )
