@@ -120,15 +120,13 @@ def _local_json(filename: str):
 
 def get_browse_data() -> tuple[pd.DataFrame, str]:
     """Returns (dataframe, source_label) for the site-like browsing pages.
-    Tries the live public API first (when toggled on); falls back to the
-    local AI-scored MP export, which has the same core columns."""
-    if st.session_state.get("use_live_data"):
-        try:
-            return fetch_all_mp_summaries_live(), "live"
-        except Exception as e:
-            st.sidebar.error(f"Live API unreachable, showing last known data.\n\n{e}")
-    local = _local_json("risk_scores_mps.json")
-    return (pd.DataFrame(local) if local else pd.DataFrame()), "local"
+    Tries the live public API first; falls back quietly to the local
+    AI-scored MP export, which has the same core columns."""
+    try:
+        return fetch_all_mp_summaries_live(), "live"
+    except Exception:
+        local = _local_json("risk_scores_mps.json")
+        return (pd.DataFrame(local) if local else pd.DataFrame()), "local"
 
 
 # -----------------------------------------------------------------------
@@ -137,8 +135,8 @@ def get_browse_data() -> tuple[pd.DataFrame, str]:
 # Distinct from STEP 3 above. This is for when you wrap the trained model
 # (Colab notebook) in your own backend serving pre-scored risk data. Until
 # then, works_df / mps_df below load straight from the Colab JSON export.
-RISK_API_BASE_URL = ""   # <- e.g. "https://your-risk-api.example.com/api/v1"
-RISK_API_KEY = "AQ.Ab8RN6ISwEQ9wh8aui9ULghadwJJHyM_ew_n9S8TPI4xpbQ49Q"
+
+RISK_API_KEY = st.secrets.get("RISK_API_KEY", "")
 
 
 def _risk_headers():
@@ -201,14 +199,7 @@ if "selected_mp" not in st.session_state:
 # -----------------------------------------------------------------------
 # STEP 6 — Sidebar: data source + nav
 # -----------------------------------------------------------------------
-st.sidebar.header("Data source")
-st.sidebar.toggle(
-    "🔄 Use live public API for browsing pages",
-    key="use_live_data",
-    help=f"Home / States / MP Profiles pull from {PUBLIC_DATA_API_BASE_URL} when on. "
-         "The AI Risk Intelligence tab is unaffected either way — it always reads "
-         "the Colab notebook's scored output.",
-)
+st.session_state["use_live_data"] = True  # always try live first, fall back silently
 browse_df, browse_source = get_browse_data()
 
 st.sidebar.header("Navigate")
@@ -535,7 +526,7 @@ elif st.session_state.nav == "📊 Analytics":
 st.divider()
 st.caption(
     "Browsing pages modeled on the public Empowered Indian MPLADS dashboard "
-    "(empoweredindian.in/mplads) and its public API. The AI Risk Intelligence "
+    "Reference- https://mplads.mospi.gov.in/digigov/dashboard.html .The AI Risk Intelligence "
     "tab is our own addition, scored by a hybrid rule-based + Isolation Forest "
     f"model (see the companion Colab notebook). Last AI scoring run: {meta.get('generated_at', 'unknown')}."
 )
